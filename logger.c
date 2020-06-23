@@ -1,8 +1,8 @@
-/*
+/*-
  * SSLsplit - transparent SSL/TLS interception
  * https://www.roe.ch/SSLsplit
  *
- * Copyright (c) 2009-2018, Daniel Roethlisberger <daniel@roe.ch>.
+ * Copyright (c) 2009-2019, Daniel Roethlisberger <daniel@roe.ch>.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -210,11 +210,14 @@ logger_thread(void *arg)
 		if (logbuf_ctl_isset(lb, LBFLAG_REOPEN)) {
 			if (logger->reopen() != 0)
 				e = 1;
+			logbuf_free(lb);
 		} else if (logbuf_ctl_isset(lb, LBFLAG_OPEN)) {
 			if (logger->open(lb->fh) != 0)
 				e = 1;
+			logbuf_free(lb);
 		} else if (logbuf_ctl_isset(lb, LBFLAG_CLOSE)) {
 			logger->close(lb->fh, lb->ctl);
+			logbuf_free(lb);
 		} else {
 			if (logbuf_write_free(lb, logger->write) < 0)
 				e = 1;

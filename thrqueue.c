@@ -2,7 +2,7 @@
  * SSLsplit - transparent SSL/TLS interception
  * https://www.roe.ch/SSLsplit
  *
- * Copyright (c) 2009-2018, Daniel Roethlisberger <daniel@roe.ch>.
+ * Copyright (c) 2009-2019, Daniel Roethlisberger <daniel@roe.ch>.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -33,7 +33,7 @@
 #include <pthread.h>
 
 /*
- * Threadsafe, bounded-size queue based on pthreads mutex and conds.
+ * Thread-safe, bounded-size queue based on pthreads mutex and conds.
  * Both enqueue and dequeue are available in a blocking and non-blocking
  * version.
  */

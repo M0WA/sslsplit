@@ -2,7 +2,7 @@
  * SSLsplit - transparent SSL/TLS interception
  * https://www.roe.ch/SSLsplit
  *
- * Copyright (c) 2009-2018, Daniel Roethlisberger <daniel@roe.ch>.
+ * Copyright (c) 2009-2019, Daniel Roethlisberger <daniel@roe.ch>.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -28,7 +28,6 @@
 
 #include "pxyconn.h"
 
-#include "pxysslshut.h"
 #include "cachemgr.h"
 #include "ssl.h"
 #include "opts.h"
@@ -59,6 +58,19 @@
 #include <openssl/rand.h>
 #include <openssl/x509.h>
 #include <openssl/x509v3.h>
+
+
+/*
+ * libevent compatibility
+ */
+#if LIBEVENT_VERSION_NUMBER < 0x02010000
+static void
+bufferevent_openssl_set_allow_dirty_shutdown(UNUSED struct bufferevent *bev,
+                                             UNUSED int allow_dirty_shutdown)
+{
+	return;
+}
+#endif /* LIBEVENT_VERSION_NUMBER < 0x02010000 */
 
 
 /*
@@ -714,6 +726,20 @@ pxy_sslctx_setoptions(SSL_CTX *sslctx, pxy_conn_ctx_t *ctx)
 #endif /* SSL_OP_NO_COMPRESSION */
 
 	SSL_CTX_set_cipher_list(sslctx, ctx->opts->ciphers);
+
+#if (OPENSSL_VERSION_NUMBER >= 0x10100000L) && !defined(LIBRESSL_VERSION_NUMBER)
+	/*
+	 * For maximum interoperability, force the security level to 0, meaning
+	 * all algorithms are permitted.  If we don't set the security level,
+	 * the level is taken from OpenSSL system configuration or library
+	 * compile-time defaults.  Security levels above 0 will reject weak
+	 * algorithms and key sizes both locally at load time and when they are
+	 * encountered from peers we receive connections from or connect to.
+	 * Specifically, our prevous default RSA leaf key size of 1024 bits
+	 * was rejected by a security level of 2 or higher (issue #248).
+	 */
+	SSL_CTX_set_security_level(sslctx, 0);
+#endif /* OPENSSL_VERSION_NUMBER >= 0x10100000L */
 }
 
 /*
@@ -858,7 +884,7 @@ pxy_srccert_create(pxy_conn_ctx_t *ctx)
 {
 	cert_t *cert = NULL;
 
-	if (ctx->opts->tgcrtdir) {
+	if (ctx->opts->leafcertdir) {
 		if (ctx->sni) {
 			cert = cachemgr_tgcrt_get(ctx->sni);
 			if (!cert) {
@@ -886,6 +912,7 @@ pxy_srccert_create(pxy_conn_ctx_t *ctx)
 					if (!wildcarded) {
 						ctx->enomem = 1;
 					} else {
+						/* increases ref count */
 						cert = cachemgr_tgcrt_get(
 						       wildcarded);
 						free(wildcarded);
@@ -907,26 +934,37 @@ pxy_srccert_create(pxy_conn_ctx_t *ctx)
 		}
 	}
 
-	if (!cert && ctx->origcrt && ctx->opts->key) {
+	if (!cert && ctx->opts->defaultleafcert) {
+		cert = ctx->opts->defaultleafcert;
+		cert_refcount_inc(cert);
+		ctx->immutable_cert = 1;
+		if (OPTS_DEBUG(ctx->opts)) {
+			log_dbg_printf("Using default leaf certificate\n");
+		}
+	}
+
+	if (!cert && ctx->origcrt && ctx->opts->leafkey) {
 		cert = cert_new();
 
 		cert->crt = cachemgr_fkcrt_get(ctx->origcrt);
 		if (cert->crt) {
-			if (OPTS_DEBUG(ctx->opts))
+			if (OPTS_DEBUG(ctx->opts)) {
 				log_dbg_printf("Certificate cache: HIT\n");
+			}
 		} else {
-			if (OPTS_DEBUG(ctx->opts))
+			if (OPTS_DEBUG(ctx->opts)) {
 				log_dbg_printf("Certificate cache: MISS\n");
+			}
 			cert->crt = ssl_x509_forge(ctx->opts->cacrt,
 			                           ctx->opts->cakey,
 			                           ctx->origcrt,
-			                           ctx->opts->key,
+			                           ctx->opts->leafkey,
 			                           NULL,
-			                           ctx->opts->crlurl);
+			                           ctx->opts->leafcrlurl);
 			cachemgr_fkcrt_set(ctx->origcrt, cert->crt);
 		}
-		cert_set_key(cert, ctx->opts->key);
-		cert_set_chain(cert, ctx->opts->chain);
+		cert_set_key(cert, ctx->opts->leafkey);
+		cert_set_chain(cert, ctx->opts->cachain);
 		ctx->generated_cert = 1;
 	}
 
@@ -1067,8 +1105,8 @@ pxy_ossl_servername_cb(SSL *ssl, UNUSED int *al, void *arg)
 			               "(SNI mismatch)\n");
 		}
 		newcrt = ssl_x509_forge(ctx->opts->cacrt, ctx->opts->cakey,
-		                        sslcrt, ctx->opts->key,
-		                        sn, ctx->opts->crlurl);
+		                        sslcrt, ctx->opts->leafkey,
+		                        sn, ctx->opts->leafcrlurl);
 		if (!newcrt) {
 			ctx->enomem = 1;
 			return SSL_TLSEXT_ERR_NOACK;
@@ -1099,8 +1137,9 @@ pxy_ossl_servername_cb(SSL *ssl, UNUSED int *al, void *arg)
 			}
 		}
 
-		newsslctx = pxy_srcsslctx_create(ctx, newcrt, ctx->opts->chain,
-		                                 ctx->opts->key);
+		newsslctx = pxy_srcsslctx_create(ctx, newcrt,
+		                                 ctx->opts->cachain,
+		                                 ctx->opts->leafkey);
 		if (!newsslctx) {
 			X509_free(newcrt);
 			return SSL_TLSEXT_ERR_NOACK;
@@ -1204,12 +1243,9 @@ pxy_dstssl_create(pxy_conn_ctx_t *ctx)
 static void
 bufferevent_free_and_close_fd(struct bufferevent *bev, pxy_conn_ctx_t *ctx)
 {
-	evutil_socket_t fd = bufferevent_getfd(bev);
-	SSL *ssl = NULL;
-
-	if ((ctx->spec->ssl || ctx->clienthello_found) && !ctx->passthrough) {
-		ssl = bufferevent_openssl_get_ssl(bev); /* does not inc refc */
-	}
+	struct bufferevent *ubev;
+	evutil_socket_t fd;
+	SSL *ssl;
 
 #ifdef DEBUG_PROXY
 	if (OPTS_DEBUG(ctx->opts)) {
@@ -1218,13 +1254,54 @@ bufferevent_free_and_close_fd(struct bufferevent *bev, pxy_conn_ctx_t *ctx)
 	}
 #endif /* DEBUG_PROXY */
 
-	bufferevent_free(bev); /* does not free SSL unless the option
-	                          BEV_OPT_CLOSE_ON_FREE was set */
-	if (ssl) {
-		pxy_ssl_shutdown(ctx->opts, ctx->evbase, ssl, fd);
+	ubev = bufferevent_get_underlying(bev);
+	ssl = bufferevent_openssl_get_ssl(bev); /* does not inc refc */
+
+	if (ubev) {
+		fd = bufferevent_getfd(ubev);
 	} else {
-		evutil_closesocket(fd);
+		fd = bufferevent_getfd(bev);
 	}
+	bufferevent_setcb(bev, NULL, NULL, NULL, NULL);
+
+	if (ssl) {
+		/*
+		 * From the libevent book:  SSL_RECEIVED_SHUTDOWN tells
+		 * SSL_shutdown to act as if we had already received a close
+		 * notify from the other end.  SSL_shutdown will then send the
+		 * final close notify in reply.  The other end will receive the
+		 * close notify and send theirs.  By this time, we will have
+		 * already closed the socket and the other end's real close
+		 * notify will never be received.  In effect, both sides will
+		 * think that they have completed a clean shutdown and keep
+		 * their sessions valid.  This strategy will fail if the socket
+		 * is not ready for writing, in which case this hack will lead
+		 * to an unclean shutdown and lost session on the other end.
+		 *
+		 * Note that in the case of autossl, the SSL object operates on
+		 * a BIO wrapper around the underlying bufferevent.
+		 */
+		SSL_set_shutdown(ssl, SSL_RECEIVED_SHUTDOWN);
+		SSL_shutdown(ssl);
+	}
+
+	bufferevent_disable(bev, EV_READ|EV_WRITE);
+	if (ubev) {
+		bufferevent_disable(ubev, EV_READ|EV_WRITE);
+		bufferevent_setfd(ubev, -1);
+		bufferevent_setcb(ubev, NULL, NULL, NULL, NULL);
+		bufferevent_free(ubev);
+	}
+	bufferevent_free(bev);
+	if (ssl) {
+		if (OPTS_DEBUG(ctx->opts)) {
+			log_dbg_printf("SSL_free() in state ");
+			log_dbg_print_free(ssl_ssl_state_to_str(ssl));
+			log_dbg_printf("\n");
+		}
+		SSL_free(ssl);
+	}
+	evutil_closesocket(fd);
 }
 
 /*
@@ -1256,13 +1333,9 @@ pxy_bufferevent_setup(pxy_conn_ctx_t *ctx, evutil_socket_t fd, SSL *ssl)
 		log_err_printf("Error creating bufferevent socket\n");
 		return NULL;
 	}
-#if LIBEVENT_VERSION_NUMBER >= 0x02010000
 	if (ssl) {
-		/* Prevent unclean (dirty) shutdowns to cause error
-		 * events on the SSL socket bufferevent. */
 		bufferevent_openssl_set_allow_dirty_shutdown(bev, 1);
 	}
-#endif /* LIBEVENT_VERSION_NUMBER >= 0x02010000 */
 	bufferevent_setcb(bev, pxy_bev_readcb, pxy_bev_writecb,
 	                  pxy_bev_eventcb, ctx);
 	bufferevent_enable(bev, EV_READ|EV_WRITE);
@@ -1618,6 +1691,8 @@ pxy_conn_autossl_peek_and_upgrade(pxy_conn_ctx_t *ctx)
 			if (!ctx->dst.bev) {
 				return 0;
 			}
+			bufferevent_openssl_set_allow_dirty_shutdown(
+			                                      ctx->dst.bev, 1);
 			bufferevent_setcb(ctx->dst.bev, pxy_bev_readcb,
 			                  pxy_bev_writecb, pxy_bev_eventcb,
 			                  ctx);
@@ -1928,6 +2003,8 @@ pxy_bev_eventcb(struct bufferevent *bev, short events, void *arg)
 			               BUFFEREVENT_SSL_ACCEPTING,
 			               BEV_OPT_DEFER_CALLBACKS);
 			if (ctx->src.bev) {
+				bufferevent_openssl_set_allow_dirty_shutdown(
+				                              ctx->src.bev, 1);
 				bufferevent_setcb(ctx->src.bev,
 				                  pxy_bev_readcb,
 				                  pxy_bev_writecb,
@@ -1953,6 +2030,14 @@ pxy_bev_eventcb(struct bufferevent *bev, short events, void *arg)
 
 		/* prepare logging, part 2 */
 		if (WANT_CONNECT_LOG(ctx) || WANT_CONTENT_LOG(ctx)) {
+			if (ctx->dsthost_str) {
+				free(ctx->dsthost_str);
+				ctx->dsthost_str = NULL;
+			}
+			if (ctx->dstport_str) {
+				free(ctx->dstport_str);
+				ctx->dstport_str = NULL;
+			}
 			if (sys_sockaddr_str((struct sockaddr *)
 			                     &ctx->dstaddr, ctx->dstaddrlen,
 			                     &ctx->dsthost_str,
@@ -2201,11 +2286,11 @@ connected:
 			                    bufferevent_get_input(bev)),
 			                evbuffer_get_length(
 			                    bufferevent_get_output(bev)),
-			                evbuffer_get_length(
-			                    other->closed ? 0 :
+							other->closed ? 0 :
+			                    evbuffer_get_length(
 			                    bufferevent_get_input(other->bev)),
-			                evbuffer_get_length(
-			                    other->closed ? 0 :
+							other->closed ? 0 :
+			                    evbuffer_get_length(
 			                    bufferevent_get_output(other->bev))
 			                );
 		}

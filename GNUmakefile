@@ -5,38 +5,40 @@
 #
 # Dependencies and features are auto-detected, but can be overridden:
 #
-# OPENSSL_BASE	Prefix of OpenSSL library and headers to build against
-# LIBEVENT_BASE	Prefix of libevent library and headers to build against
-# LIBPCAP_BASE	Prefix of libpcap library and headers to build against
-# LIBNET_BASE	Prefix of libnet library and headers to build against
-# CHECK_BASE	Prefix of check library and headers to build against (optional)
-# PKGCONFIG	Name/path of pkg-config program to use for auto-detection
-# PCFLAGS	Additional pkg-config flags
-# XNU_VERSION	Version of included XNU headers to build against (OS X only)
-# FEATURES	Enable optional or force-enable undetected features (see below)
+# OPENSSL_BASE  Prefix of OpenSSL library and headers to build against
+# LIBEVENT_BASE Prefix of libevent library and headers to build against
+# LIBPCAP_BASE  Prefix of libpcap library and headers to build against
+# LIBNET_BASE   Prefix of libnet library and headers to build against
+# CHECK_BASE    Prefix of check library and headers to build against (optional)
+# PKGCONFIG     Name/path of pkg-config program to use for auto-detection
+# PCFLAGS       Additional pkg-config flags
+# XNU_VERSION   Version of included XNU headers to build against (OS X only)
+# FEATURES      Enable optional or force-enable undetected features (see below)
 #
 # Where and how to install to:
 #
-# PREFIX	Prefix to install under (default /usr/local)
-# DESTDIR	Destination root under which prefix is located (default /)
-# MANDIR	Subdir of PREFIX that contains man section dirs
-# INSTALLUID	UID to use for installed files if installing as root
-# INSTALLGID	GID to use for installed files if installing as root
+# PREFIX        Prefix to install under (default /usr/local)
+# DESTDIR       Destination root under which prefix is located (default /)
+# BINDIR        Path to user executables (default $(PREFIX)/bin)
+# MANDIR        Path to man section dirs (default $(PREFIX)/share/man)
+# SYSCONFDIR    Path to system configuration (default $(PREFIX)/etc)
+# INSTALLUID    UID to use for installed files if installing as root
+# INSTALLGID    GID to use for installed files if installing as root
 #
 # Standard compiler variables are respected, e.g.:
 #
-# CC		Compiler, e.g. for cross-compiling, ccache or ccc-analyzer
-# CFLAGS	Additional compiler flags, e.g. optimization flags
-# CPPFLAGS	Additional pre-processor flags
-# LDFLAGS	Additional linker flags
-# LIBS		Additional libraries to link against
-# SOURCE_DATE_EPOCH	Set to epoch time to make the build reproducible
+# CC            Compiler, e.g. for cross-compiling, ccache or ccc-analyzer
+# CFLAGS        Additional compiler flags, e.g. optimization flags
+# CPPFLAGS      Additional pre-processor flags
+# LDFLAGS       Additional linker flags
+# LIBS          Additional libraries to link against
+# SOURCE_DATE_EPOCH     Set to epoch time to make the build reproducible
 #
 # On macOS, the following build environment variables are respected:
 #
-# DEVELOPER_DIR		Override Xcode Command Line Developer Tools directory
-# MACOSX_VERSION_MIN	Minimal version of macOS to target, e.g. 10.11
-# SDK			SDK name to build against, e.g. macosx, macosx10.11
+# DEVELOPER_DIR         Override Xcode Command Line Developer Tools directory
+# MACOSX_VERSION_MIN    Minimal version of macOS to target, e.g. 10.11
+# SDK                   SDK name to build against, e.g. macosx, macosx10.11
 #
 # Examples:
 #
@@ -45,6 +47,9 @@
 #
 # Create a statically linked binary:
 # % PCFLAGS='--static' CFLAGS='-static' LDFLAGS='-static' make
+#
+# Build against musl libc that needs an additional library for fts(3):
+# % LIBS='-lfts' make
 #
 # Build a macOS binary for El Capitan using the default SDK from Xcode 7.3.1:
 # % MACOSX_VERSION_MIN=10.11 DEVELOPER_DIR=/Applications/Xcode-7.3.1.app/Contents/Developer make
@@ -177,7 +182,9 @@ endif
 ### Variables you might need to override
 
 PREFIX?=	/usr/local
-MANDIR?=	share/man
+BINDIR?=	$(PREFIX)/bin
+SYSCONFDIR?=	$(PREFIX)/etc
+MANDIR?=	$(PREFIX)/share/man
 
 INSTALLUID?=	0
 INSTALLGID?=	0
@@ -504,7 +511,7 @@ clean:
 	$(RM) -f $(TARGET).conf
 	$(RM) -rf *.dSYM
 
-SUBSTITUTIONS:=	-e 's,/usr/local,$(PREFIX),' \
+SUBSTITUTIONS:=	-e 's,/usr/local/etc/sslsplit,$(SYSCONFDIR)/$(TARGET),' \
 		-e 's,@@VERSION@@,$(VERSION),' \
 		-e 's,@@DATE@@,$(BUILD_DATE),'
 
@@ -518,30 +525,28 @@ $(TARGET).conf.5: $(TARGET).conf.5.in $(MKFS) FORCE
 	$(SED) $(SUBSTITUTIONS) <$< >$@
 
 install: $(TARGET) $(TARGET).conf $(TARGET).1 $(TARGET).conf.5
-	test -d $(DESTDIR)$(PREFIX)/bin || $(MKDIR) -p $(DESTDIR)$(PREFIX)/bin
-	test -d $(DESTDIR)$(PREFIX)/$(TARGET) || \
-		$(MKDIR) -p $(DESTDIR)$(PREFIX)/sslsplit
-	test -d $(DESTDIR)$(PREFIX)/$(MANDIR)/man1 || \
-		$(MKDIR) -p $(DESTDIR)$(PREFIX)/$(MANDIR)/man1
-	test -d $(DESTDIR)$(PREFIX)/$(MANDIR)/man5 || \
-		$(MKDIR) -p $(DESTDIR)$(PREFIX)/$(MANDIR)/man5
-	test -d $(DESTDIR)/var/log/$(TARGET) || \
-		$(MKDIR) -p $(DESTDIR)/var/log/$(TARGET)
-	test -d $(DESTDIR)/var/run/$(TARGET) || \
-		$(MKDIR) -p $(DESTDIR)/var/run/$(TARGET)
+	test -d $(DESTDIR)$(BINDIR) || $(MKDIR) -p $(DESTDIR)$(BINDIR)
+	test -d $(DESTDIR)$(SYSCONFDIR)/$(TARGET) || \
+		$(MKDIR) -p $(DESTDIR)$(SYSCONFDIR)/$(TARGET)
+	test -d $(DESTDIR)$(MANDIR)/man1 || \
+		$(MKDIR) -p $(DESTDIR)$(MANDIR)/man1
+	test -d $(DESTDIR)$(MANDIR)/man5 || \
+		$(MKDIR) -p $(DESTDIR)$(MANDIR)/man5
 	$(INSTALL) $(BINOWNERFLAGS) -m $(BINMODE) \
-		$(TARGET) $(DESTDIR)$(PREFIX)/bin/
+		$(TARGET) $(DESTDIR)$(BINDIR)/
 	$(INSTALL) $(CNFOWNERFLAGS) -m $(CNFMODE) \
 		$(TARGET).conf \
-		$(DESTDIR)$(PREFIX)/$(TARGET)/$(TARGET).conf.sample
+		$(DESTDIR)$(SYSCONFDIR)/$(TARGET)/$(TARGET).conf.sample
 	$(INSTALL) $(MANOWNERFLAGS) -m $(MANMODE) \
-		$(TARGET).1 $(DESTDIR)$(PREFIX)/$(MANDIR)/man1/
+		$(TARGET).1 $(DESTDIR)$(MANDIR)/man1/
 	$(INSTALL) $(MANOWNERFLAGS) -m $(MANMODE) \
-		$(TARGET).conf.5 $(DESTDIR)$(PREFIX)/$(MANDIR)/man5/
+		$(TARGET).conf.5 $(DESTDIR)$(MANDIR)/man5/
 
 deinstall:
-	$(RM) -f $(DESTDIR)$(PREFIX)/bin/$(TARGET) $(DESTDIR)$(PREFIX)/$(MANDIR)/man1/$(TARGET).1 \
-		$(DESTDIR)$(PREFIX)/$(MANDIR)/man5/$(TARGET).conf.5
+	$(RM) -f $(DESTDIR)$(BINDIR)/$(TARGET) \
+		$(DESTDIR)$(MANDIR)/man1/$(TARGET).1 \
+		$(DESTDIR)$(MANDIR)/man5/$(TARGET).conf.5
+	$(RM) -rf $(DESTDIR)$(SYSCONFDIR)/$(TARGET)/
 
 ifdef GITDIR
 lint:
@@ -558,7 +563,7 @@ mantest: $(TARGET).1 $(TARGET).conf.5
 	$(MAN) -M . 5 $(TARGET).conf
 	$(RM) man1 man5
 
-copyright: *.c *.h *.1 *.5 extra/*/*.c
+copyright: *.c *.h *.1.in *.5.in extra/*/*.c
 	Mk/bin/copyright.py $^
 
 $(PKGNAME)-$(VERSION).1.txt: $(TARGET).1

@@ -1,6 +1,9 @@
 # SSLsplit - transparent SSL/TLS interception
 https://www.roe.ch/SSLsplit
 
+[![Build Status](https://travis-ci.org/droe/sslsplit.svg)](https://travis-ci.org/droe/sslsplit)
+[![Gitter chat](https://badges.gitter.im/droe/sslsplit.png)](https://gitter.im/droe/sslsplit)
+
 ## Overview
 
 SSLsplit is a tool for man-in-the-middle attacks against SSL/TLS encrypted
@@ -52,10 +55,10 @@ the various NAT engines.
 ## Requirements
 
 SSLsplit depends on the OpenSSL, libevent 2.x, libpcap and libnet 1.1.x
-libraries bydefault; libpcap and libnet are not needed if the mirroring feature
-is omitted.  The build depends on GNU make and a POSIX.2 environment in `PATH`.
-If available, pkg-config is used to locate and configure the dependencies.  The
-optional unit tests depend on the check library.
+libraries by default; libpcap and libnet are not needed if the mirroring
+feature is omitted.  The build depends on GNU make and a POSIX.2 environment in
+`PATH`.  If available, pkg-config is used to locate and configure the
+dependencies.  The optional unit tests depend on the check library.
 
 SSLsplit currently supports the following operating systems and NAT mechanisms:
 

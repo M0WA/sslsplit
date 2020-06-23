@@ -2,7 +2,7 @@
  * SSLsplit - transparent SSL/TLS interception
  * https://www.roe.ch/SSLsplit
  *
- * Copyright (c) 2009-2018, Daniel Roethlisberger <daniel@roe.ch>.
+ * Copyright (c) 2009-2019, Daniel Roethlisberger <daniel@roe.ch>.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -32,7 +32,7 @@
 #include "attrib.h"
 #include "opts.h"
 
-int privsep_fork(opts_t *, int[], size_t);
+int privsep_fork(opts_t *, int[], size_t, int *);
 
 int privsep_client_openfile(int, const char *, int);
 int privsep_client_opensock(int, const proxyspec_t *spec);

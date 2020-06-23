@@ -1,4 +1,34 @@
 
+### SSLsplit 0.5.5 2019-08-30
+
+-   Add -A option for specifying a default leaf certificate instead of
+    generating it on the fly (issue #139).
+-   Rename the following config file options for clarity and consistency:
+    -   LeafCerts to LeafKey
+    -   TargetCertDir to LeafCertDir
+    -   CRL to LeafCRLURL
+    The old syntax is still accepted for backwards compatibility.
+-   Increase the default RSA leaf key size to 2048 bits and force an OpenSSL
+    security level of 0 in order to maximize interoperability in the default
+    configuration.  OpenSSL with a security level of 2 or higher was rejecting
+    our old default leaf key size of 1024 bits (issue #248).
+-   Propagate the exit status of the privsep child process to the parent
+    process and use 128+signal convention (issue #252).
+-   Fix unexpected connection termination for certificates without a subject
+    common name.
+-   Fix TCP ports in packet mirroring mode (issue #247).
+-   Fix certificate loading with LibreSSL 2.9.2 and later.
+-   Fix MANDIR make variable semantics to GNU standards and introduce
+    BINDIR and SYSCONFDIR in order to allow better control over where files are
+    installed by the install target (pull request #255 by @arkamar and
+    follow-up work).  Also fixes the sample config file to be installed to
+    $(SYSCONFDIR)/sslsplit/ instead of $(PREFIX)/sslsplit/ by default.
+-   No longer create /var/log/sslsplit and /var/run/sslsplit directories as
+    part of `make install` (issue #251).
+-   Add XNU headers for macOS Mojave 10.14.1 to 10.14.3.
+-   Minor bugfixes and improvements.
+
+
 ### SSLsplit 0.5.4 2018-10-29
 
 This release includes work sponsored by HackerOne.
@@ -75,9 +105,9 @@ This release includes work sponsored by HackerOne.
 -   Fix data processing when EOF is received before all incoming data has been
     processed.
 -   Fix multiple signal handling issues in the privilege separation parent
-    which led to the parent process being killed ungracefully (SIGTERM) or
-    being stuck in wait() while still having signals (SIGQUIT etc) queued up
-    for forwarding to the child process (issue #137).
+    which led to the parent process being killed ungracefully or being stuck
+    in wait() while still having signals queued up for forwarding to the child
+    process (issue #137).
 -   No longer assume an out of memory condition when a certificate contains
     neither a CN nor a subjectAltName extension.
 -   Fix parallel make build (-j) for the test target (issue #140).

@@ -2,7 +2,7 @@
  * SSLsplit - transparent SSL/TLS interception
  * https://www.roe.ch/SSLsplit
  *
- * Copyright (c) 2009-2018, Daniel Roethlisberger <daniel@roe.ch>.
+ * Copyright (c) 2009-2019, Daniel Roethlisberger <daniel@roe.ch>.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -547,7 +547,7 @@ ssl_sha1_to_str(unsigned char *rawhash, int colons)
 	int rv;
 
 	rv = asprintf(&str, colons ?
-	              "%02X:%02X:%02X:%02X:%02X:%02X:%02X:%02X:%02X:%02X"
+	              "%02X:%02X:%02X:%02X:%02X:%02X:%02X:%02X:%02X:%02X:"
 	              "%02X:%02X:%02X:%02X:%02X:%02X:%02X:%02X:%02X:%02X" :
 	              "%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X"
 	              "%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X",
@@ -1230,9 +1230,9 @@ ssl_x509chain_load(X509 **crt, STACK_OF(X509) **chain, const char *filename)
 			goto leave3;
 	}
 
-#if (OPENSSL_VERSION_NUMBER < 0x1000200fL) || defined(LIBRESSL_VERSION_NUMBER)
+#if (OPENSSL_VERSION_NUMBER < 0x1000200fL) || (defined(LIBRESSL_VERSION_NUMBER) && LIBRESSL_VERSION_NUMBER < 0x20902000L)
 	tmpchain = tmpctx->extra_certs;
-#else /* OpenSSL >= 1.0.2 */
+#else /* OpenSSL >= 1.0.2 || LIBRESSL_VERSION_NUMBER >= 0x20902000L */
 	rv = SSL_CTX_get0_chain_certs(tmpctx, &tmpchain);
 	if (rv != 1)
 		goto leave3;
@@ -1747,6 +1747,7 @@ ssl_x509_names_to_str(X509 *crt)
 		sz += strlen(*p) + 1;
 	}
 	if (!sz) {
+		buf = strdup("-");
 		goto out1;
 	}
 
@@ -1935,7 +1936,7 @@ ssl_session_to_str(SSL_SESSION *sess)
 
 /*
  * Returns non-zero if the session timeout has not expired yet,
- * zero if the session has expired or an error occured.
+ * zero if the session has expired or an error occurred.
  */
 int
 ssl_session_is_valid(SSL_SESSION *sess)
@@ -1979,7 +1980,7 @@ ssl_is_ocspreq(const unsigned char *buf, size_t sz)
  *
  * The OpenSSL SNI API only allows to read the indicated server name at the
  * time when we have to provide the server certificate.  OpenSSL does not
- * allow to asynchroniously read the indicated server name, wait for some
+ * allow to asynchronously read the indicated server name, wait for some
  * unrelated event to happen, and then later to provide the server certificate
  * to use and continue the handshake.  Therefore we resort to parsing the
  * server name from the ClientHello manually before OpenSSL gets to work on it.

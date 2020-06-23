@@ -2,7 +2,7 @@
  * SSLsplit - transparent SSL/TLS interception
  * https://www.roe.ch/SSLsplit
  *
- * Copyright (c) 2009-2018, Daniel Roethlisberger <daniel@roe.ch>.
+ * Copyright (c) 2009-2019, Daniel Roethlisberger <daniel@roe.ch>.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -76,7 +76,7 @@
 /* Whether we short-circuit calls to privsep_client_* directly to
  * privsep_server_* within the client process, bypassing the privilege
  * separation mechanism; this is a performance optimization for use cases
- * where the user choses performance over security, especially with options
+ * where the user chooses performance over security, especially with options
  * that require privsep operations for each connection passing through.
  * In the current implementation, for consistency, we still fork normally, but
  * will not actually send any privsep requests to the parent process. */
@@ -873,7 +873,7 @@ privsep_client_close(int clisock)
  * will not be touched.
  */
 int
-privsep_fork(opts_t *opts, int clisock[], size_t nclisock)
+privsep_fork(opts_t *opts, int clisock[], size_t nclisock, int *parent_rv)
 {
 	int selfpipev[2]; /* self-pipe trick: signal handler -> select */
 	int chldpipev[2]; /* el cheapo interprocess sync early after fork */
@@ -1023,21 +1023,30 @@ privsep_fork(opts_t *opts, int clisock[], size_t nclisock)
 	close(selfpipev[1]);
 
 	int status;
-	wait(&status);
+	pid_t wpid;
+	wpid = wait(&status);
+	if (wpid != pid) {
+		/* should never happen, warn if it does anyway */
+		log_err_printf("Child pid %lld != expected %lld from wait(2)\n",
+		               (long long)wpid, (long long)pid);
+	}
 	if (WIFEXITED(status)) {
 		if (WEXITSTATUS(status) != 0) {
-			log_err_printf("Child proc %lld exited with status %d\n",
-			               (long long)pid, WEXITSTATUS(status));
+			log_err_printf("Child pid %lld exited with status %d\n",
+			               (long long)wpid, WEXITSTATUS(status));
 		} else {
-			log_dbg_printf("Child proc %lld exited with status %d\n",
-			               (long long)pid, WEXITSTATUS(status));
+			log_dbg_printf("Child pid %lld exited with status %d\n",
+			               (long long)wpid, WEXITSTATUS(status));
 		}
+		*parent_rv = WEXITSTATUS(status);
 	} else if (WIFSIGNALED(status)) {
-		log_err_printf("Child proc %lld killed by signal %d\n",
-		               (long long)pid, WTERMSIG(status));
+		log_err_printf("Child pid %lld killed by signal %d\n",
+		               (long long)wpid, WTERMSIG(status));
+		*parent_rv = 128 + WTERMSIG(status);
 	} else {
-		log_err_printf("Child proc %lld neither exited nor killed\n",
-		               (long long)pid);
+		/* can only happen with WUNTRACED option or active tracing */
+		log_err_printf("Child pid %lld neither exited nor killed\n",
+		               (long long)wpid);
 	}
 
 	return 1;

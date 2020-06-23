@@ -2,7 +2,7 @@
 .\" SSLsplit - transparent SSL/TLS interception
 .\" https://www.roe.ch/SSLsplit
 .\"
-.\" Copyright (c) 2009-2018, Daniel Roethlisberger <daniel@roe.ch>.
+.\" Copyright (c) 2009-2019, Daniel Roethlisberger <daniel@roe.ch>.
 .\" All rights reserved.
 .\"
 .\" Redistribution and use in source and binary forms, with or without
@@ -82,7 +82,7 @@ is available, instead of generating forged ones.  SSLsplit supports NULL-prefix
 CN certificates but otherwise does not implement exploits against specific
 certificate verification vulnerabilities in SSL/TLS stacks.
 .LP
-SSLsplit implements a number of defenses against mechanisms which would
+SSLsplit implements a number of defences against mechanisms which would
 normally prevent MitM attacks or make them more difficult.
 SSLsplit can deny OCSP requests in a generic way.
 For HTTP and HTTPS connections, SSLsplit mangles headers to
@@ -116,6 +116,16 @@ reconfiguration or route injection, /etc/hosts modification and so on.
 .B \-a \fIpemfile\fP
 Use client certificate from \fIpemfile\fP when destination server requests a
 client certificate.
+.B \-A \fIpemfile\fP
+Use private key, certificate and certificate chain from PEM file \fIpemfile\fP
+as leaf certificate instead of generating a leaf certificate on the fly.
+The PEM file must contain a single private key, a single certificate and
+optionally intermediate and root CA certificates to use as certificate chain.
+When using \fB-t\fP, SSLsplit will first attempt to use a matching certificate
+loaded from \fIcertdir\fP.
+If \fB-t\fP is also used and a connection matches any certificate in the
+directory specified with the \fB-t\fP option, that matching certificate is used
+instead, taking precedence over the certificate specified with \fB-A\fP.
 .TP
 .B \-b \fIpemfile\fP
 Use client private key from \fIpemfile\fP when destination server requests a
@@ -155,7 +165,7 @@ List all supported NAT engines available on the system and exit.  See
 NAT ENGINES for a list of NAT engines currently supported by SSLsplit.
 .TP
 .B \-f \fIconffile\fP
-Read configuraion from \fIconffile\fP.
+Read configuration from \fIconffile\fP.
 .TP
 .B \-F \fIlogspec\fP
 Log connection content to separate log files with the given path specification
@@ -216,7 +226,7 @@ no matching certificate in the provided certificate directory.
 .TP
 .B \-K \fIpemfile\fP
 Use private key from \fIpemfile\fP for the leaf certificates forged on-the-fly.
-If \fB-K\fP is not given, SSLsplit will generate a random 1024-bit RSA key.
+If \fB-K\fP is not given, SSLsplit will generate a random 2048 bit RSA key.
 .TP
 .B \-l \fIlogfile\fP
 Log connections to \fIlogfile\fP in a single line per connection format,
@@ -334,7 +344,10 @@ A single PEM file must contain a single private key, a single certificate and
 optionally intermediate and root CA certificates to use as certificate chain.
 When using \fB-t\fP, SSLsplit will first attempt to use a matching certificate
 loaded from \fIcertdir\fP.
-If \fB-c\fP and \fB-k\fP are also given, certificates will be forged
+If \fB-A\fP is also given, when there is no match in \fIcertdir\fP, the default
+key, certificate and certificate chain from the PEM file specified with the
+\fB-A\fP option is used instead.
+Otherwise, if \fB-c\fP and \fB-k\fP are also given, certificates will be forged
 on-the-fly for sites matching none of the common names in the certificates
 loaded from \fIcertdir\fP.
 Otherwise, connections matching no certificate will be dropped, or if
@@ -484,15 +497,6 @@ no supported NAT engine or when running \fBsslsplit\fP on a different system
 than the NAT rules redirecting the actual connections.
 Note that when using \fB-j\fP with \fBsni\fP, you may need to prepare
 \fIjaildir\fP to make name resolution work from within the chroot directory.
-.SH SIGNALS
-A running \fBsslsplit\fP accepts SIGINT and SIGQUIT for a clean shutdown and
-SIGUSR1 to re-open the single-file log files (such as \fB-l\fP, \fB-L\fP and
-\fB-X\fP).  The canonical way to rotate or post-process logs is to rename the
-active log file, send SIGUSR1 to the PID in the PID file given by \fB-p\fP,
-give SSLsplit some time to flush buffers after closing the old file, and then
-post-process the renamed log file.
-Per-connection log files (such as \fB-S\fP and \fB-F\fP) are not re-opened
-because their filename is specific to the connection.
 .SH "LOG SPECIFICATIONS"
 Log specifications are composed of zero or more printf-style directives;
 ordinary characters are included directly in the output path.
@@ -689,6 +693,20 @@ Fully supported, including IPv6.
 Note that return path filtering (rp_filter) also needs to be disabled on
 interfaces which handle TPROXY redirected traffic.
 .RE
+.SH SIGNALS
+A running \fBsslsplit\fP accepts SIGINT and SIGTERM for a clean shutdown and
+SIGUSR1 to re-open the single-file log files (such as \fB-l\fP, \fB-L\fP and
+\fB-X\fP).  The canonical way to rotate or post-process logs is to rename the
+active log file, send SIGUSR1 to the PID in the PID file given by \fB-p\fP,
+give SSLsplit some time to flush buffers after closing the old file, and then
+post-process the renamed log file.
+Per-connection log files (such as \fB-S\fP and \fB-F\fP) are not re-opened
+because their filename is specific to the connection.
+.SH "EXIT STATUS"
+The \fBsslsplit\fP process will exit with 0 on regular shutdown
+(SIGINT, SIGTERM), and 128 + signal number on controlled shutdown based on
+receiving a different signal such as SIGHUP.  Exit status in the range 1..127
+indicates error conditions.
 .SH EXAMPLES
 Matching the above NAT engine configuration samples, intercept HTTP and HTTPS
 over IPv4 and IPv6 using forged certificates with CA private key \fBca.key\fP
@@ -828,7 +846,7 @@ chronological order of their first contribution:
 Steve Wills, Landon Fuller, Wayne Jensen, Rory McNamara, Alexander Neumann,
 Adam Jacob Muller, Richard Poole, Maciej Kotowicz, Eun Soo Park, Christian
 Groschupp, Alexander Savchenkov, Soner Tari, Petr Vanek, Hilko Bengen,
-Philip Duldig, Levente Polyak, Nick French and Cihan Komecoglu.
+Philip Duldig, Levente Polyak, Nick French, Cihan Komecoglu and Sergey Pinaev.
 
 SSLsplit contains work sponsored by HackerOne.
 .SH BUGS
